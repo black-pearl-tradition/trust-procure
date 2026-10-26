@@ -53,6 +53,65 @@ if (!in_array($order['status'], ['delivered', 'completed'], true)) {
     redirect('/user/orders/view.php?id=' . $orderId);
 }
 
+$pdo->beginTransaction();
+try {
+    $lockedOrderStmt = $pdo->prepare('SELECT status FROM orders WHERE id = ? AND user_id = ? FOR UPDATE');
+    $lockedOrderStmt->execute([$orderId, (int) $_SESSION['user_id']]);
+    $lockedStatus = $lockedOrderStmt->fetchColumn();
+
+    $verifiedPaymentsStmt = $pdo->prepare("SELECT id FROM payments WHERE order_id = ? AND status = 'verified' FOR UPDATE");
+    $verifiedPaymentsStmt->execute([$orderId]);
+    $hasVerifiedPayment = (bool) $verifiedPaymentsStmt->fetch();
+
+    if (!$lockedStatus || !$hasVerifiedPayment || !in_array($lockedStatus, ['delivered', 'completed'], true)) {
+        $pdo->rollBack();
+        set_flash('error', 'Your receipt is no longer available for this order.');
+        redirect('/user/orders/view.php?id=' . $orderId);
+    }
+    $order['status'] = $lockedStatus;
+
+    $receiptEventsStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM order_events
+         WHERE order_id = ? AND event_type IN ('customer_receipt_issued', 'customer_receipt_copy')"
+    );
+    $receiptEventsStmt->execute([$orderId]);
+    $receiptAccessCount = (int) $receiptEventsStmt->fetchColumn();
+    $receiptCopyNumber = $receiptAccessCount + 1;
+    $isDuplicateCopy = $receiptAccessCount > 0;
+    $receiptEventType = $isDuplicateCopy ? 'customer_receipt_copy' : 'customer_receipt_issued';
+    $receiptEventTitle = $isDuplicateCopy ? 'Duplicate receipt copy accessed' : 'Original receipt issued';
+    $receiptEventDetails = $isDuplicateCopy
+        ? 'Customer accessed duplicate receipt copy #' . $receiptCopyNumber . '.'
+        : 'Customer accessed the original receipt.';
+
+    $receiptEventStmt = $pdo->prepare(
+        'INSERT INTO order_events (order_id, user_id, event_type, title, details)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    $receiptEventStmt->execute([
+        $orderId,
+        (int) $_SESSION['user_id'],
+        $receiptEventType,
+        $receiptEventTitle,
+        $receiptEventDetails,
+    ]);
+    $receiptEventId = (int) $pdo->lastInsertId();
+
+    $receiptIssuedStmt = $pdo->prepare('SELECT created_at FROM order_events WHERE id = ?');
+    $receiptIssuedStmt->execute([$receiptEventId]);
+    $receiptIssuedAt = (string) $receiptIssuedStmt->fetchColumn();
+
+    $pdo->commit();
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    throw $e;
+}
+
+$receiptTypeLabel = $isDuplicateCopy
+    ? 'Duplicate receipt copy #' . $receiptCopyNumber
+    : 'Original receipt';
 $totalPaid = array_sum(array_column($payments, 'amount'));
 $pageTitle = 'Receipt for Order #' . $orderId;
 ?>
@@ -111,8 +170,8 @@ $pageTitle = 'Receipt for Order #' . $orderId;
                 <p>Thank you for your purchase.</p>
             </div>
             <div class="receipt-meta">
-                <strong>Receipt for Order #<?= $orderId ?></strong><br>
-                Issued <?= e(date('d M Y, H:i')) ?><br>
+                <strong><?= e($receiptTypeLabel) ?> for Order #<?= $orderId ?></strong><br>
+                Issued <?= e(display_date($receiptIssuedAt, 'd M Y, H:i')) ?><br>
                 Status: <?= e(order_status_label($order['status'])) ?>
             </div>
         </header>
@@ -142,7 +201,7 @@ $pageTitle = 'Receipt for Order #' . $orderId;
                 <?php endforeach; ?>
             </tbody>
         </table>
-        <p class="receipt-note">This receipt confirms payments verified by TrustProcure. Keep it for your records.</p>
+        <p class="receipt-note">This receipt confirms payments verified by TrustProcure. Later accesses are marked as duplicate copies. This records receipt access but cannot prevent printing a saved copy again.</p>
     </main>
 </body>
 </html>

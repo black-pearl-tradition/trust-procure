@@ -49,7 +49,14 @@ $notes = $invoice['notes'];
 if ($reviewNotes !== '') {
     // Notes are capped by the column width, so keep the tail rather than
     // letting MySQL reject an over-long note outright.
-    $notes = mb_substr($reviewNotes, 0, 500);
+    if (function_exists('mb_substr')) {
+        $notes = mb_substr($reviewNotes, 0, 500);
+    } else {
+        $characters = preg_split('//u', $reviewNotes, -1, PREG_SPLIT_NO_EMPTY);
+        $notes = $characters === false
+            ? substr($reviewNotes, 0, 500)
+            : implode('', array_slice($characters, 0, 500));
+    }
 }
 
 $pdo->prepare(

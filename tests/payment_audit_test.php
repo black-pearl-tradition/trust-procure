@@ -5,7 +5,7 @@
  * All fixture rows are written in a transaction that is always rolled back.
  */
 $host = getenv('DB_HOST') ?: 'localhost';
-$name = getenv('DB_NAME') ?: 'procure_db';
+$name = getenv('DB_NAME') ?: 'tr';
 $user = getenv('DB_USER') ?: 'root';
 $password = getenv('DB_PASS') ?: '';
 

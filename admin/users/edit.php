@@ -30,6 +30,7 @@ $fullName = $user['full_name'];
 $phone = $user['phone'];
 $role = $user['role'];
 $status = $user['status'];
+$newPassword = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf('/admin/users/index.php');
@@ -37,6 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $phone = trim($_POST['phone'] ?? '');
     $role = $_POST['role'] ?? $user['role'];
     $status = $_POST['status'] ?? 'active';
+    $newPassword = $_POST['new_password'] ?? '';
 
     if ($fullName === '') $errors[] = 'Please enter a full name.';
     if (!array_key_exists($role, $assignableRoles) && $role !== $user['role']) {
@@ -45,11 +47,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($id === (int) $_SESSION['user_id'] && ($role !== $user['role'] || $status !== 'active')) {
         $errors[] = 'You cannot change your own role or suspend your own account.';
     }
+    if ($newPassword !== '' && $id === (int) $_SESSION['user_id']) {
+        $errors[] = 'Use My Account to change your own password.';
+    } elseif ($newPassword !== '') {
+        $errors = array_merge($errors, password_policy_errors($newPassword));
+    }
 
     if (!$errors) {
-        $stmt = $pdo->prepare('UPDATE users SET full_name=?, phone=?, role=?, status=? WHERE id=?');
-        $stmt->execute([$fullName, $phone, $role, $status, $id]);
-        log_activity($pdo, $_SESSION['user_id'], 'user_updated', "Updated user #$id (role: $role, status: $status)");
+        if ($newPassword !== '') {
+            $passwordHash = password_hash($newPassword, PASSWORD_DEFAULT);
+            $stmt = $pdo->prepare('UPDATE users SET full_name=?, phone=?, role=?, status=?, password_hash=?, session_version = session_version + 1 WHERE id=?');
+            $stmt->execute([$fullName, $phone, $role, $status, $passwordHash, $id]);
+            log_activity($pdo, $_SESSION['user_id'], 'user_password_reset', "Updated user #$id (role: $role, status: $status) and reset password");
+        } else {
+            $stmt = $pdo->prepare('UPDATE users SET full_name=?, phone=?, role=?, status=? WHERE id=?');
+            $stmt->execute([$fullName, $phone, $role, $status, $id]);
+            log_activity($pdo, $_SESSION['user_id'], 'user_updated', "Updated user #$id (role: $role, status: $status)");
+        }
         set_flash('success', 'User updated.');
         redirect('/admin/users/index.php');
     }
@@ -79,6 +93,13 @@ include __DIR__ . '/../../includes/admin_layout_start.php';
                 <label for="phone">Phone</label>
                 <input type="tel" id="phone" name="phone" value="<?= e($phone) ?>">
             </div>
+            <?php if ($id !== (int) $_SESSION['user_id']): ?>
+                <div class="field">
+                    <label for="new_password">Set a new password <span class="muted">(optional)</span></label>
+                    <input type="password" id="new_password" name="new_password" autocomplete="new-password">
+                    <div class="hint">Leave blank to keep the current password. A reset signs the user out of existing sessions. Passwords are stored securely and cannot be viewed.</div>
+                </div>
+            <?php endif; ?>
             <div class="field-row">
                 <div class="field">
                     <label for="role">Role</label>

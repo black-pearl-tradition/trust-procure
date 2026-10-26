@@ -23,7 +23,7 @@ $adminNav = [
         // lights up on the till's own pages (index, receipt, sales, wallets)
         // without any future path that happens to contain those three letters.
         ['label' => 'Point of Sale', 'href' => '/admin/pos/index.php', 'match' => 'pos/'],
-        ['label' => 'Customer Orders', 'href' => '/admin/orders/index.php', 'match' => 'orders'],
+        ['label' => 'Customer Orders', 'href' => '/admin/orders/index.php?tab=orders', 'match' => 'orders'],
         ['label' => 'Approval Workflow', 'href' => '/admin/approvals/index.php', 'match' => 'approvals'],
         ['label' => 'Purchase Orders', 'href' => '/admin/purchase_orders/index.php', 'match' => 'purchase_orders'],
         ['label' => 'Goods Receiving', 'href' => '/admin/purchase_orders/receive.php', 'match' => 'purchase_orders/receive.php'],

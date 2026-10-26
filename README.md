@@ -10,7 +10,7 @@ status progression all confirmed working with no PHP errors or warnings.
 
 ## Requirements
 
-- PHP 8.5.12 or later, with the `pdo_mysql` extension
+- PHP 8.5.12 or later, with the `mbstring` and `pdo_mysql` extensions
 - MySQL 5.7+ or MariaDB 10.4+
 - A local server stack such as XAMPP, or PHP's built-in server for quick testing
 
@@ -34,8 +34,10 @@ status progression all confirmed working with no PHP errors or warnings.
    touching your existing rows.
 
 3. **Set database credentials** (only needed if they differ from XAMPP's
-   defaults of user `root` with no password). Edit `config/database.php`,
-   or set environment variables `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`.
+   defaults of user `root` with no password). The app connects to the `tr`
+   database created by `config/schema.sql`. Edit `config/database.php`, or set
+   environment variables `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS` to override
+   those defaults.
    Set `APP_URL` to the trusted HTTPS origin used in password-reset emails,
    for example `https://procurement.example.com/tps`.
 

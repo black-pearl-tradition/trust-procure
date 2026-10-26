@@ -432,7 +432,7 @@ try {
         'the Point of Sale link is not highlighted on an unrelated admin page'
     );
     pos_test_check(
-        (bool) preg_match('~<a href="[^"]*admin/orders/index\.php" class="active"~', $ordersPage),
+        (bool) preg_match('~<a href="[^"]*admin/orders/index\.php(?:\?[^"]*)?" class="active"~', $ordersPage),
         'Customer Orders still highlights itself correctly'
     );
 
@@ -1081,4 +1081,3 @@ try {
 }
 
 echo "\nPOS receipt tests passed.\n";
-

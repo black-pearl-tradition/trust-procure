@@ -44,6 +44,11 @@ assert_payment_workflow(
     'Invoice review should allow approval and rejection only.'
 );
 assert_payment_workflow(
+    str_contains($invoiceHandler, "function_exists('mb_substr')")
+        && str_contains($invoiceHandler, "preg_split('//u'"),
+    'Invoice note truncation should work when mbstring is unavailable.'
+);
+assert_payment_workflow(
     str_contains($invoiceHandler, 'legacy settled status'),
     'Existing settled invoice records should be protected from further review.'
 );

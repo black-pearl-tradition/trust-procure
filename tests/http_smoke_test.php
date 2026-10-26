@@ -17,6 +17,8 @@
 const SMOKE_BASE_URL = 'http://localhost/tps';
 const SMOKE_PASSWORD = 'SmokeTest123';
 const SMOKE_PO_PREFIX = 'PO-SMK-';
+const SMOKE_CUSTOMER_PASSWORD = 'SmokeCustomer123';
+const SMOKE_CUSTOMER_RESET_PASSWORD = 'SmokeReset123';
 
 $smokeFailures = 0;
 $smokeChecks = 0;
@@ -222,7 +224,9 @@ smoke_check(smoke_server_up(), 'web server answers at ' . SMOKE_BASE_URL);
 $tag = smoke_random_tag();
 $supplierEmail = 'smokesupplier-' . $tag . '@example.test';
 $adminEmail = 'smokeadmin-' . $tag . '@example.test';
+$createdCustomerEmail = 'smokecustomer-' . $tag . '@example.test';
 $poNumber = SMOKE_PO_PREFIX . strtoupper($tag);
+$createdCustomerId = 0;
 
 $baseline = [];
 foreach (['users', 'suppliers', 'purchase_orders', 'purchase_order_items', 'purchase_order_documents', 'notifications'] as $baselineTable) {
@@ -382,6 +386,94 @@ $admin->get('/login.php');
 $admin->post('/login.php', ['email' => $adminEmail, 'password' => SMOKE_PASSWORD, 'csrf_token' => $admin->token()]);
 smoke_check($admin->status() === 302 && str_contains($admin->location(), 'admin/dashboard.php'), 'admin login redirects to the admin dashboard');
 
+$admin->get('/admin/users/add.php');
+smoke_check($admin->status() === 200 && $admin->token() !== '', 'admin can open the add-user form');
+$admin->post('/admin/users/add.php', [
+    'full_name' => 'Smoke Created Customer',
+    'email' => $createdCustomerEmail,
+    'phone' => '',
+    'role' => 'user',
+    'password' => SMOKE_CUSTOMER_PASSWORD,
+    'csrf_token' => $admin->token(),
+]);
+smoke_check(
+    $admin->status() === 302 && str_contains($admin->location(), '/admin/users/index.php'),
+    'admin can create a customer account'
+);
+
+$createdCustomerStmt = $pdo->prepare('SELECT id, role, status, password_hash, session_version FROM users WHERE email = ?');
+$createdCustomerStmt->execute([$createdCustomerEmail]);
+$createdCustomer = $createdCustomerStmt->fetch();
+$createdCustomerId = (int) ($createdCustomer['id'] ?? 0);
+smoke_check(
+    $createdCustomerId > 0
+        && $createdCustomer['role'] === 'user'
+        && $createdCustomer['status'] === 'active'
+        && password_verify(SMOKE_CUSTOMER_PASSWORD, $createdCustomer['password_hash']),
+    'admin-created customer is active with a valid password hash'
+);
+
+$createdCustomerClient = new SmokeClient();
+$createdCustomerClient->get('/login.php');
+$createdCustomerClient->post('/login.php', [
+    'email' => $createdCustomerEmail,
+    'password' => SMOKE_CUSTOMER_PASSWORD,
+    'csrf_token' => $createdCustomerClient->token(),
+]);
+smoke_check(
+    $createdCustomerClient->status() === 302
+        && str_contains($createdCustomerClient->location(), '/user/dashboard.php'),
+    'admin-created customer can log in'
+);
+
+$customerEdit = $admin->get('/admin/users/edit.php?id=' . $createdCustomerId);
+smoke_check(
+    $admin->status() === 200 && str_contains($customerEdit, 'name="new_password"'),
+    'admin can access the customer password reset field'
+);
+$admin->post('/admin/users/edit.php?id=' . $createdCustomerId, [
+    'id' => (string) $createdCustomerId,
+    'full_name' => 'Smoke Created Customer',
+    'phone' => '',
+    'role' => 'user',
+    'status' => 'active',
+    'new_password' => SMOKE_CUSTOMER_RESET_PASSWORD,
+    'csrf_token' => $admin->token(),
+]);
+smoke_check(
+    $admin->status() === 302 && str_contains($admin->location(), '/admin/users/index.php'),
+    'admin can reset the customer password'
+);
+
+$createdCustomerStmt->execute([$createdCustomerEmail]);
+$resetCustomer = $createdCustomerStmt->fetch();
+smoke_check(
+    $resetCustomer
+        && (int) $resetCustomer['session_version'] > (int) $createdCustomer['session_version']
+        && password_verify(SMOKE_CUSTOMER_RESET_PASSWORD, $resetCustomer['password_hash'])
+        && !password_verify(SMOKE_CUSTOMER_PASSWORD, $resetCustomer['password_hash']),
+    'password reset updates the hash and increments the session version'
+);
+unset($createdCustomer['password_hash'], $resetCustomer['password_hash']);
+
+$createdCustomerClient->get('/user/dashboard.php');
+smoke_check(
+    $createdCustomerClient->status() === 302
+        && str_contains($createdCustomerClient->location(), 'login.php'),
+    'password reset invalidates the customer’s existing session'
+);
+$createdCustomerClient->get('/login.php');
+$createdCustomerClient->post('/login.php', [
+    'email' => $createdCustomerEmail,
+    'password' => SMOKE_CUSTOMER_RESET_PASSWORD,
+    'csrf_token' => $createdCustomerClient->token(),
+]);
+smoke_check(
+    $createdCustomerClient->status() === 302
+        && str_contains($createdCustomerClient->location(), '/user/dashboard.php'),
+    'customer can log in with the reset password'
+);
+
 $adminView = $admin->get('/admin/purchase_orders/view.php?id=' . $fixturePoId);
 smoke_check($admin->status() === 200 && str_contains($adminView, 'Documents from the supplier'), 'admin order view lists supplier documents');
 smoke_check(str_contains($adminView, 'Supplier proposed'), 'admin order view shows the proposed date');
@@ -417,7 +509,8 @@ $pdo->prepare('DELETE FROM notifications WHERE user_id IN (?, ?)')->execute([$su
 // Supplier actions also notify the real admin accounts (by design); those rows
 // name the random fixture PO number, which no real data can collide with.
 $pdo->prepare('DELETE FROM notifications WHERE message LIKE ?')->execute(['%' . $poNumber . '%']);
-$pdo->prepare('DELETE FROM audit_logs WHERE user_id IN (?, ?)')->execute([$supplierUserId, $adminUserId]);
+$pdo->prepare('DELETE FROM audit_logs WHERE user_id IN (?, ?, ?)')->execute([$supplierUserId, $adminUserId, $createdCustomerId ?: null]);
+$pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$createdCustomerId]);
 $pdo->prepare('DELETE FROM purchase_order_documents WHERE purchase_order_id = ?')->execute([$fixturePoId]);
 $pdo->prepare('DELETE FROM purchase_order_items WHERE purchase_order_id = ?')->execute([$fixturePoId]);
 $pdo->prepare('DELETE FROM purchase_orders WHERE id = ?')->execute([$fixturePoId]);
@@ -443,4 +536,3 @@ foreach ($baseline as $baselineTable => $baselineCount) {
 }
 
 echo 'HTTP smoke checks passed: ' . $smokeChecks . ' checks, ' . $smokeSkips . ' skips.' . PHP_EOL;
-
