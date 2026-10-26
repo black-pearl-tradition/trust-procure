@@ -1,0 +1,8 @@
+/vendor/
+/node_modules/
+/tmp_chrome_profile/
+/uploads/
+.env
+*.log
+.DS_Store
+Thumbs.db
